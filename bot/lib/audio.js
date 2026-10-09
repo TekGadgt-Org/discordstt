@@ -8,6 +8,9 @@ class OpusToPcm extends Transform {
   constructor(options = {}) {
     super(options);
     this.encoder = options.encoder || new OpusScript(PCM_RATE, 1, OpusScript.Application.AUDIO);
+    // A supplied codec belongs to its caller unless ownership is explicitly transferred.
+    this.ownsEncoder = options.ownsEncoder === true || !options.encoder;
+    this.encoderDeleted = false;
   }
 
   _transform(packet, encoding, callback) {
@@ -18,6 +21,18 @@ class OpusToPcm extends Transform {
       }
       callback();
     } catch (error) { callback(error); }
+  }
+
+  _destroy(error, callback) {
+    if (this.ownsEncoder && !this.encoderDeleted) {
+      this.encoderDeleted = true;
+      try {
+        this.encoder.delete();
+      } catch {
+        // Codec cleanup must not replace the stream's original error.
+      }
+    }
+    callback(error);
   }
 }
 
