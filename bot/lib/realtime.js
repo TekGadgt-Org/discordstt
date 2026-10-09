@@ -22,15 +22,21 @@ class RealtimeTranscriber {
   connect() {
     return new Promise((resolve, reject) => {
       const ws = this.ws = new this.WebSocketImpl(this.url, { headers: { Authorization: `Bearer ${this.apiKey}` } });
-      const fail = (error) => { this.emit('error', error); reject(error); };
+      let settled = false;
+      const fail = (error) => { this.emit('error', error); if (!settled) { settled = true; reject(error); } };
       ws.once('open', () => {
         this.send({ type: 'session.update', session: { type: 'transcription', audio: { input: { format: { type: 'audio/pcm', rate: PCM_RATE }, transcription: { model: this.model }, turn_detection: null } } } });
         for (const message of this.queue.splice(0)) this.send(message);
+        settled = true;
         resolve();
       });
       ws.on('message', (data) => this.handleMessage(JSON.parse(data.toString())));
       ws.once('error', fail);
-      ws.once('close', () => this.emit('close'));
+      ws.once('close', () => {
+        const error = new Error('OpenAI realtime connection closed');
+        if (!settled) fail(error);
+        this.emit('close');
+      });
     });
   }
 
