@@ -17,10 +17,10 @@ class TranscriptionManager {
     try {
       const transcriber = state.transcriber = this.transcriberFactory();
       transcriber.on('transcript', (text) => {
-        if (text.trim() && !state.stopped) this.send(channel, `**${label}:** ${text.trim()}`);
+        if (text.trim() && !state.stopped && this.sessions.get(guildId) === state) this.send(channel, `**${label}:** ${text.trim()}`);
       });
       transcriber.on('error', (error) => {
-        if (!state.stopped) this.send(channel, `Transcription error: ${error.message || 'connection failed'}`);
+        if (!state.stopped) this.fail(state, channel, 'Transcription connection error; transcription stopped.');
       });
       transcriber.on('close', () => this.fail(state, channel, 'Transcription connection closed.'));
       this.watchConnection(state, connection, channel);
@@ -40,11 +40,11 @@ class TranscriptionManager {
     state.sources.add(source);
     const stream = this.streamFactory(source);
     state.streams.add(stream);
-    stream.on('data', (pcm) => state.transcriber.append(pcm));
+    stream.on('data', (pcm) => { if (!state.stopped && state.transcriber) state.transcriber.append(pcm); });
     const finish = async () => {
       state.streams.delete(stream);
       state.sources.delete(source);
-      state.transcriber.commit();
+      if (!state.stopped && state.transcriber) state.transcriber.commit();
       // @discordjs/voice caches subscriptions by user id. Remove the ended
       // source before subscribing, otherwise the next turn receives a dead stream.
       if (connection.receiver.subscriptions?.get(userId) === source) {
@@ -70,7 +70,10 @@ class TranscriptionManager {
     for (const stream of state.streams) stream.destroy();
     state.sources.clear();
     state.streams.clear();
-    state.transcriber?.close();
+    const transcriber = state.transcriber;
+    state.transcriber = null;
+    transcriber?.removeAllListeners?.();
+    transcriber?.close();
     this.sessions.delete(guildId);
   }
 

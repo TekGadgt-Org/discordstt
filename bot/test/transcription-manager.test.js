@@ -72,6 +72,29 @@ test('provider close and voice disconnect stop the session and clean listeners',
   assert.equal(connection.sent.length, 1);
 });
 
+test('provider error sends one sanitized notice and fully cleans up', async () => {
+  const transcriber = new FakeTranscriber();
+  const manager = new TranscriptionManager({ transcriberFactory: () => transcriber, streamFactory: (source) => source });
+  const f = fixture();
+  await manager.start({ guildId: 'guild', userId: 'user', connection: f.connection, channel: f.channel, label: 'speaker' });
+  const source = f.sources[0];
+  transcriber.emit('error', new Error('secret provider payload'));
+  assert.equal(manager.sessions.size, 0);
+  assert.equal(f.connection.receiver.subscriptions.size, 0);
+  assert.equal(source.destroyed, true);
+  assert.equal(transcriber.closed, true);
+  assert.equal(transcriber.listenerCount('error'), 0);
+  await tick();
+  assert.deepEqual(f.sent, ['Transcription connection error; transcription stopped.']);
+  source.write(Buffer.from('late'));
+  transcriber.emit('transcript', 'late transcript');
+  transcriber.emit('close');
+  await tick();
+  assert.deepEqual(f.sent, ['Transcription connection error; transcription stopped.']);
+  assert.equal(transcriber.appends.length, 0);
+  manager.stop('guild');
+});
+
 test('send rejection is contained and stop is idempotent', async () => {
   const transcriber = new FakeTranscriber();
   const manager = new TranscriptionManager({ transcriberFactory: () => transcriber, streamFactory: (source) => source });
