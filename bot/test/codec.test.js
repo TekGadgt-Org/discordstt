@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const { once } = require('node:events');
 const { Readable } = require('node:stream');
 const OpusScript = require('opusscript');
-const { OpusToPcm, PCM_RATE } = require('../lib/audio');
+const { OpusToPcm, createOpusStream, PCM_RATE } = require('../lib/audio');
 
 test('Opus fixture decodes to aligned 24 kHz mono PCM', async () => {
   const encoder = new OpusScript(PCM_RATE, 1, OpusScript.Application.AUDIO);
@@ -74,4 +74,48 @@ test('injected codec remains caller-owned by default', async () => {
   decoder.end();
   await once(decoder, 'close');
   assert.equal(codec.deleteCalls, 0);
+});
+
+function countDecoderDeletes(source) {
+  const decoder = createOpusStream(source);
+  let deleteCalls = 0;
+  const originalDelete = decoder.encoder.delete.bind(decoder.encoder);
+  decoder.encoder.delete = () => { deleteCalls += 1; originalDelete(); };
+  decoder.resume();
+  return { decoder, get deleteCalls() { return deleteCalls; } };
+}
+
+test('upstream destroy without error closes and deletes the owned decoder once', async () => {
+  const source = new Readable({ read() {} });
+  const tracked = countDecoderDeletes(source);
+  const close = once(tracked.decoder, 'close');
+  source.destroy();
+  await close;
+  assert.equal(tracked.deleteCalls, 1);
+  tracked.decoder.destroy();
+  assert.equal(tracked.deleteCalls, 1);
+});
+
+test('upstream error closes the decoder and preserves the original error', async () => {
+  const source = new Readable({ read() {} });
+  const tracked = countDecoderDeletes(source);
+  const error = new Error('upstream failed');
+  let decoderError;
+  tracked.decoder.once('error', (received) => { decoderError = received; });
+  source.once('error', () => {});
+  const close = new Promise((resolve) => tracked.decoder.once('close', resolve));
+  source.destroy(error);
+  await close;
+  assert.equal(decoderError, error);
+  assert.equal(tracked.deleteCalls, 1);
+});
+
+test('normal upstream end does not turn into a decoder destroy', async () => {
+  const source = new Readable({ read() {} });
+  const tracked = countDecoderDeletes(source);
+  const close = once(tracked.decoder, 'close');
+  source.push(null);
+  await close;
+  assert.equal(tracked.deleteCalls, 1);
+  assert.equal(tracked.decoder.errored, null);
 });

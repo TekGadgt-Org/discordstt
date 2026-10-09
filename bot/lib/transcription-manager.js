@@ -1,9 +1,9 @@
 const { EndBehaviorType } = require('@discordjs/voice');
-const { OpusToPcm } = require('./audio');
+const { createOpusStream } = require('./audio');
 const { RealtimeTranscriber } = require('./realtime');
 
 class TranscriptionManager {
-  constructor({ transcriberFactory = (options) => new RealtimeTranscriber(options), silenceMs = 2000, streamFactory = (source) => source.pipe(new OpusToPcm()) } = {}) {
+  constructor({ transcriberFactory = (options) => new RealtimeTranscriber(options), silenceMs = 2000, streamFactory = createOpusStream } = {}) {
     this.transcriberFactory = transcriberFactory;
     this.silenceMs = silenceMs;
     this.streamFactory = streamFactory;

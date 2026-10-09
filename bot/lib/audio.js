@@ -40,4 +40,34 @@ function pcmChunkToEvent(chunk) {
   return { type: 'input_audio_buffer.append', audio: chunk.toString('base64') };
 }
 
-module.exports = { OpusToPcm, pcmChunkToEvent, PCM_RATE, MAX_CHUNK_BYTES };
+function createOpusStream(source) {
+  const decoder = new OpusToPcm();
+  let active = true;
+
+  const cleanup = () => {
+    if (!active) return;
+    active = false;
+    decoder.off('close', cleanup);
+  };
+  const destroyDecoder = (error) => {
+    if (active) decoder.destroy(error);
+  };
+  const onError = (error) => {
+    destroyDecoder(error);
+  };
+  const onClose = () => {
+    // A normal readable end is followed by close; pipe() already ended the
+    // decoder in that case. An early close must explicitly release its codec.
+    if (!source.readableEnded && !decoder.writableEnded) destroyDecoder();
+    source.off('error', onError);
+    source.off('close', onClose);
+  };
+
+  source.once('error', onError);
+  source.once('close', onClose);
+  decoder.once('close', cleanup);
+  source.pipe(decoder);
+  return decoder;
+}
+
+module.exports = { OpusToPcm, createOpusStream, pcmChunkToEvent, PCM_RATE, MAX_CHUNK_BYTES };

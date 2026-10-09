@@ -1,8 +1,10 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
+const { once } = require('node:events');
 const { PassThrough } = require('node:stream');
 const { TranscriptionManager } = require('../lib/transcription-manager');
+const { createOpusStream } = require('../lib/audio');
 
 class FakeTranscriber extends EventEmitter {
   constructor() { super(); this.appends = []; this.commits = 0; this.closed = false; }
@@ -105,4 +107,23 @@ test('send rejection is contained and stop is idempotent', async () => {
   await tick();
   manager.stop('guild'); manager.stop('guild');
   assert.equal(transcriber.closed, true);
+});
+
+test('stop racing upstream close closes the owned decoder without a late restart', async () => {
+  const transcriber = new FakeTranscriber();
+  const streams = [];
+  const manager = new TranscriptionManager({
+    transcriberFactory: () => transcriber,
+    streamFactory: (source) => { const stream = createOpusStream(source); streams.push(stream); return stream; },
+  });
+  const f = fixture();
+  await manager.start({ guildId: 'guild', userId: 'user', connection: f.connection, channel: f.channel, label: 'speaker' });
+  const closed = once(streams[0], 'close');
+  manager.stop('guild');
+  f.sources[0].destroy(new Error('upstream close'));
+  await closed;
+  await tick();
+  assert.equal(manager.sessions.size, 0);
+  assert.equal(streams.length, 1);
+  assert.equal(streams[0].destroyed, true);
 });
