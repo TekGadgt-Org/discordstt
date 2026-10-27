@@ -1,12 +1,21 @@
 const { REST, Routes } = require('discord.js');
-const { clientId, guildId, token } = require('./config.json');
+const { commandConfig, commandScope } = require('./lib/command-config');
 
-const rest = new REST({ version: '10' }).setToken(token);
+async function main() {
+  const { token, clientId, guildId } = commandConfig();
+  const scope = commandScope();
+  if (scope === 'guild' && !guildId) throw new Error('DISCORD_GUILD_ID is required for guild command deletion');
+  const route = scope === 'guild'
+    ? Routes.applicationGuildCommands(clientId, guildId)
+    : Routes.applicationCommands(clientId);
+  const dryRun = process.env.DISCORD_COMMAND_DRY_RUN === '1' || process.env.DISCORD_COMMAND_DRY_RUN === 'true';
+  if (dryRun) {
+    console.log(`Dry run: would delete ${scope} application commands.`);
+    return;
+  }
+  await new REST({ version: '10' }).setToken(token).put(route, { body: [] });
+  console.log(`Successfully deleted ${scope} application commands.`);
+}
 
-rest.put(Routes.applicationGuildCommands(clientId, guildId), { body: [] })
-	.then(() => console.log('Successfully deleted all guild commands.'))
-	.catch(console.error);
-
-rest.put(Routes.applicationCommands(clientId), { body: [] })
-	.then(() => console.log('Successfully deleted all application commands.'))
-	.catch(console.error);
+if (require.main === module) main().catch((error) => { console.error(error.message); process.exitCode = 1; });
+module.exports = { main };
